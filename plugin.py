@@ -3,12 +3,22 @@
 # Author: moroen
 #
 """
-<plugin key="IKEA-Tradfri" name="IKEA Tradfri" author="moroen" version="1.0.3" wikilink="http://www.domoticz.com/wiki/plugins/plugin.html" externallink="https://www.google.com/">
+<plugin key="IKEA-Tradfri" name="IKEA Tradfri" author="moroen" version="1.0.6" externallink="https://github.com/moroen/IKEA-Tradfri-plugin">
     <params>
         <param field="Address" label="IP Address" width="200px" required="true" default="127.0.0.1"/>
-        <param field="Mode1" label="Key" width="200px" required="true" default=""/>
-
+        <param field="Mode5" label="Identity" with="200px" required="true" default=""/> 
+        <param field="Mode1" label="PSK" width="200px" required="true" default=""/>
+        
         <param field="Mode2" label="Observe changes" width="75px">
+            <options>
+                <option label="Yes" value="True"/>
+                <option label="No" value="False"  default="true" />
+            </options>
+        </param>
+
+        <param field="Mode4" label="Polling interval (seconds)" width="75px" required="true" default="30"/>
+
+        <param field="Mode3" label="Add groups as devices" width="75px">
             <options>
                 <option label="Yes" value="True"/>
                 <option label="No" value="False"  default="true" />
@@ -27,6 +37,9 @@
 """
 import Domoticz
 import json
+import colors
+
+colorOption=""
 
 class BasePlugin:
     #enabled = False
@@ -39,9 +52,6 @@ class BasePlugin:
     CoapAdapter = None
     outstandingPings = 0
     nextConnect = 3
-
-    whiteTemps = {0:"Off", 10:"f5faf6", 20:"f1e0b5", 30:"efd275"}
-    hexLevels = {"f5faf6":10, "f1e0b5":20, "efd275":30}
 
     def __init__(self):
         self.pluginStatus = 0
@@ -57,23 +67,42 @@ class BasePlugin:
         else:
             i=max(Devices)+1
 
-        WhiteOptions = {"LevelActions": "|||", "LevelNames": "Off|Cold|Normal|Warm", "LevelOffHidden": "true","SelectorStyle": "0"}
+        whiteLevelNames, whiteLevelActions = colors.wbLevelDefinitions()
+        WhiteOptions = {"LevelActions": whiteLevelActions, "LevelNames": whiteLevelNames, "LevelOffHidden": "true","SelectorStyle": "0"}
+        
+        colorLevelNames, colorLevelActions = colors.colorLevelDefinitions()
+        colorOptions = {"LevelActions": colorLevelActions, "LevelNames": colorLevelNames, "LevelOffHidden": "false", "SelectorStyle": "1"}
 
         ikeaIds = []
         # Add unregistred lights
         for aLight in ikeaDevices:
+            Domoticz.Debug ("Registering: {0}".format(json.dumps(aLight)))
+
             devID = str(aLight['DeviceID'])
             ikeaIds.append(devID)
+
+            if not "HasRGB" in aLight:
+                aLight["HasRGB"] = False
+
             if not devID in self.lights:
+                deviceType = 244
+                subType = 73
 
                 if aLight['Dimmable']:
-                    thisSwitchType=7
+                    switchType=7
                 else:
-                    thisSwitchType=0
+                    switchType=0
 
-                Domoticz.Device(Name=aLight['Name'], Unit=i,  TypeName="Switch", Switchtype=thisSwitchType, DeviceID=devID).Create()
+                #Basic device
+                Domoticz.Device(Name=aLight['Name'], Unit=i,  Type=deviceType, Subtype=subType, Switchtype=switchType, DeviceID=devID).Create()
                 self.lights[devID] = {"DeviceID": aLight['DeviceID'], "Unit": i}
                 i=i+1
+
+                if aLight["HasRGB"]:
+                    Domoticz.Device(Name=aLight['Name'] + " - Color",  Unit=i, TypeName="Selector Switch", Switchtype=18, Options=colorOptions, DeviceID=devID+":CWS").Create()
+                    self.lights[devID+":CWS"] = {"DeviceID": devID+":CWS", "Unit": i}
+                    i=i+1
+                                
                 if aLight['HasWB'] == True:
                     Domoticz.Device(Name=aLight['Name'] + " - WB",  Unit=i, TypeName="Selector Switch", Switchtype=18, Options=WhiteOptions, DeviceID=devID+":WB").Create()
                     self.lights[devID+":WB"] = {"DeviceID": devID+":WB", "Unit": i}
@@ -86,11 +115,17 @@ class BasePlugin:
             if devID[-3:] == ":WB":
                 devID = devID[:-3]
 
+            if devID[-4:] == ":CWS":
+                devID = devID[:-4]
+
             if not devID in ikeaIds:
                 Devices[aUnit].Delete()
 
     def updateDeviceState(self, deviceState):
+<<<<<<< HEAD
         Domoticz.Log("updateDevicestate: {0}".format(deviceState))
+=======
+>>>>>>> development
         for aDev in deviceState:
             devID = str(aDev["DeviceID"])
             targetUnit = self.lights[devID]['Unit']
@@ -121,13 +156,15 @@ class BasePlugin:
 
             if "Hex" in aDev:
                 if aDev["Hex"] != None:
-                    wbdevID = devID+":WB"
-                    targetUnit = self.lights[wbdevID]['Unit']
-                    targetLevel = self.hexLevels[aDev['Hex']]
+                    if devID+":WB" in self.lights:
+                        wbdevID = devID+":WB"
+                        targetUnit = self.lights[wbdevID]['Unit']
+                        Devices[targetUnit].Update(nValue=nVal, sValue=str(colors.wbLevelForHex(aDev['Hex'])))
 
-                    Domoticz.Debug("Hex: "+aDev["Hex"]+" Target Unit: "+str(targetUnit)+" Target level: "+str(targetLevel))
-                    
-                    Devices[targetUnit].Update(nValue=1, sValue=str(targetLevel))
+                    if devID+":CWS" in self.lights:
+                        wbdevID = devID+":CWS"
+                        targetUnit = self.lights[wbdevID]['Unit']
+                        Devices[targetUnit].Update(nValue=nVal, sValue=str(colors.colorLevelForHex(aDev['Hex'])))
 
     def connectToAdaptor(self):
         self.CoapAdapter = Domoticz.Connection(Name="Main", Transport="TCP/IP", Protocol="JSON", Address="127.0.0.1", Port="1234")
@@ -146,7 +183,7 @@ class BasePlugin:
             for aUnit in Devices:
                 self.lights[Devices[aUnit].DeviceID] = {"DeviceID": Devices[aUnit].DeviceID, "Unit": aUnit}
 
-        self.connectToAdaptor();
+        self.connectToAdaptor()
 
     def onStop(self):
         #Domoticz.Log("onStop called")
@@ -157,16 +194,14 @@ class BasePlugin:
 
         if (Status==0):
             Domoticz.Log("Connected successfully to: "+Parameters["Address"])
-            Connection.Send(Message=json.dumps({"action":"setConfig", "gateway": Parameters["Address"], "key": Parameters["Mode1"], "observe": Parameters["Mode2"]}).encode(encoding='utf_8'), Delay=1)
+            Connection.Send(Message=json.dumps({"action":"setConfig", "gateway": Parameters["Address"], "identity": Parameters["Mode5"], "psk": Parameters["Mode1"], "observe": Parameters["Mode2"], "pollinterval": Parameters['Mode4'], "groups": Parameters["Mode3"]}).encode(encoding='utf_8'), Delay=1)
         else:
             Domoticz.Log("Failed to connect to IKEA tradfri COAP-adapter! Status: {0} Description: {1}".format(Status, Description))
         return True
 
     #def onMessage(self, Connection, Data, Status, Extra):
     def onMessage(self, Connection, Data):
-        #Domoticz.Log("onMessage called")
-        Domoticz.Log("Received: " + str(Data))
-
+        #Domoticz.Debug("Received: " + str(Data))
         command = json.loads(Data.decode("utf-8"))
 
         #Domoticz.Log("Command: " + command['action'])
@@ -189,7 +224,7 @@ class BasePlugin:
             Domoticz.Log(str(command))
 
     def onCommand(self, Unit, Command, Level, Hue):
-        Domoticz.Debug("Command: " + str(Command)+" Level: "+str(Level)+" Type: "+str(Devices[Unit].Type)+" SubType: "+str(Devices[Unit].SubType))
+        Domoticz.Debug("Command: " + str(Command)+" Level: "+str(Level)+" Type: "+str(Devices[Unit].Type)+" SubType: "+str(Devices[Unit].SubType)+" Hue: "+str(Hue))
 
         if (Devices[Unit].Type == 244) and (Devices[Unit].SubType == 73):
             if Command=="On":
@@ -206,16 +241,22 @@ class BasePlugin:
             # This is a WB-device
             hex = None
 
-            devId = Devices[Unit].DeviceID.split(':')[0]
-
+            # [0] is the DeviceID [1] is the subType (WB/CWS)
+            devId = Devices[Unit].DeviceID.split(':')
+            
             if Level==0:
                 #Off
-                Domoticz.Debug("Setting WB to off")
-                self.CoapAdapter.Send(Message=json.dumps({"action":"setState", "state": "Off", "deviceID": devId}).encode(encoding='utf_8'))
+                self.CoapAdapter.Send(Message=json.dumps({"action":"setState", "state": "Off", "deviceID": devId[0]}).encode(encoding='utf_8'))
 
             else:
-                self.CoapAdapter.Send(Message=json.dumps({"action":"setWB", "deviceID": devId, "hex": self.whiteTemps[Level] }).encode(encoding='utf_8'))
-            
+                if devId[1] == "WB":
+                    self.CoapAdapter.Send(Message=json.dumps({"action":"setHex", "deviceID": devId[0], "hex": colors.wb(Level)["Hex"]}).encode(encoding='utf_8'))
+                if devId[1] == "CWS":
+                    self.CoapAdapter.Send(Message=json.dumps({"action":"setHex", "deviceID": devId[0], "hex": colors.color(Level)["Hex"]}).encode(encoding='utf_8'))
+
+        # if (Devices[Unit].Type == 241) and (Devices[Unit].SubType == 1):
+        #     # This is a RGB-Device
+        #     Domoticz.Debug("RGB - Command: {0} Level: {1} Hue: {2}".format(Command, Level, Hue))
 
     def onNotification(self, Name, Subject, Text, Status, Priority, Sound, ImageFile):
         Domoticz.Log("Notification: " + Name + "," + Subject + "," + Text + "," + Status + "," + str(Priority) + "," + Sound + "," + ImageFile)

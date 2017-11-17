@@ -4,7 +4,7 @@ import asyncio
 import json, configparser, os
 
 from pytradfri import Gateway
-from pytradfri.api.aiocoap_api import api_factory
+from pytradfri.api.aiocoap_api import APIFactory
 
 version = 0.1
 
@@ -67,6 +67,7 @@ class IkeaFactory():
 
     async def initGateway(self, client, ip, key, observe):
         print("Setting gateway")
+        
         self.api = await api_factory(ip, key)
         self.gateway = Gateway()
 

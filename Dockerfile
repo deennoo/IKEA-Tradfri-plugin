@@ -13,13 +13,16 @@ RUN python3 -m pip install cython
 
 WORKDIR /usr/src/build
 RUN git clone https://github.com/ggravlingen/pytradfri.git
-WORKDIR /usr/src/build/pytradfri/script
-#RUN python3 setup.py install
-
-RUN sh install-aiocoap.sh
-
 WORKDIR /usr/src/build/pytradfri
+RUN pip3 install -r requirements.txt
 RUN python3 setup.py install
+
+RUN pip3 install ipython
+
+#RUN sh install-aiocoap.sh
+
+#WORKDIR /usr/src/build/pytradfri
+#RUN python3 setup.py install
 
 WORKDIR /usr/src/app
 

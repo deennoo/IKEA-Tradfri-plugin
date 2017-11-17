@@ -11,9 +11,9 @@ import os
 
 import twisted.scripts.twistd as t
 from pytradfri import Gateway
-from pytradfri.api.libcoap_api import api_factory
+from pytradfri.api.libcoap_api import APIFactory
 
-version = "0.4"
+version = "0.5"
 verbose = False
 
 INIFILE = "{0}/devices.ini".format(os.path.dirname(os.path.realpath(__file__)))
@@ -23,6 +23,13 @@ deviceConfig = configparser.ConfigParser()
 
 if os.path.exists(INIFILE):
     deviceConfig.read(INIFILE)
+
+currentError = False
+
+def error(f):
+    global currentError
+    print (f.getErrorMessage())
+    currentError = True
 
 def verbosePrint(txt):
     if verbose:
@@ -66,7 +73,8 @@ class CoapAdapter(TelnetProtocol):
         for command in commands:
             if command['action']=="setConfig":
                 # print("Setting config")
-                self.factory.initGateway(self, command['gateway'], command['key'], command['observe'])
+                self.factory.initGateway(self, command)
+                #self.factory.initGateway(self, command['gateway'], command['key'], command['observe'], command['pollinterval'], command['groups'])
 
             if command['action']=="getLights":
                 self.factory.sendDeviceList(self)
@@ -77,8 +85,8 @@ class CoapAdapter(TelnetProtocol):
             if command['action']=="setState":
                 self.factory.setState(self, command["deviceID"], command["state"])
 
-            if command['action']=="setWB":
-                self.factory.setWB(self, command["deviceID"], command['hex'])
+            if command['action']=="setHex":
+                self.factory.setHex(self, command["deviceID"], command['hex'])
 
         # except:
         #    print("Error: Failed to parse JSON")
@@ -126,9 +134,10 @@ class ikeaGroup():
         answer["result"] =  devices
 
         verbosePrint(answer)
-
-        client.transport.write(json.dumps(answer).encode(encoding='utf_8'))
-
+        try:
+            client.transport.write(json.dumps(answer).encode(encoding='utf_8'))
+        except Exception as e:
+            print("Error sending group state")
 
 class ikeaLight():
 
@@ -183,8 +192,10 @@ class ikeaLight():
         answer["result"] =  devices
 
         verbosePrint(answer)
-
-        client.transport.write(json.dumps(answer).encode(encoding='utf_8'))
+        try:
+            client.transport.write(json.dumps(answer).encode(encoding='utf_8'))
+        except Exception as e:
+            print("Error sending light state")
 
 class AdaptorFactory(ServerFactory):
 
@@ -195,6 +206,7 @@ class AdaptorFactory(ServerFactory):
     groups = None
 
     observe = False
+    groups = False
 
     def __init__(self):
         self.clients = []
@@ -216,8 +228,9 @@ class AdaptorFactory(ServerFactory):
 
     def announce(self):
         try:
-            self.devices = self.api(*self.api(self.gateway.get_devices()))
-            self.groups = self.api(*self.api(self.gateway.get_groups()))
+            self.devices = self.api(self.api(self.gateway.get_devices()))
+            if self.groups:
+                self.groups = self.api(self.api(self.gateway.get_groups()))
 
             for dev in self.devices:
                 if dev.has_light_control:
@@ -225,25 +238,44 @@ class AdaptorFactory(ServerFactory):
                         for client in self.clients:
                             self.ikeaLights[dev.id].sendState(client)
 
-            for group in self.groups:
-                if self.ikeaGroups[group.id].hasChanged(group):
-                    for client in self.clients:
-                        self.ikeaGroups[group.id].sendState(client)
+            if self.groups:
+                for group in self.groups:
+                    if self.ikeaGroups[group.id].hasChanged(group):
+                        for client in self.clients:
+                            self.ikeaGroups[group.id].sendState(client)
         except Exception as e: 
-            print("Error in annouce: {0}".format(e))
+            print("Error in annouce: {0}:{1}".format(e, e.message))
 
-    def initGateway(self, client, ip, key, observe):
+    #def initGateway(self, client, ip, key, observe, interval, groups):
+    def initGateway(self, client, command):
+        verbosePrint("Initializing gateway")
         connectedToGW = False
-        try:
-            self.api = api_factory(ip, key)
-            self.gateway = Gateway()
-            connectedToGW = True
-        except:
-            connectedToGW = False
+
+        if command['observe']=="True":
+            self.observe = True
+        else:
+            self.observe = False
+
+        if command['groups']=="True":
+            self.groups = True
+        else:
+            self.groups = False
+
+        #try:
+        api_factory = APIFactory(command['gateway'], command['identity'], command['psk'])
+ 
+        self.api = api_factory.request
+        self.gateway = Gateway()
+        
+        connectedToGW = True
+        #except:
+        #    connectedToGW = False
 
         if connectedToGW:
-            self.devices = self.api(*self.api(self.gateway.get_devices()))
-            self.groups = self.api(*self.api(self.gateway.get_groups()))
+            self.devices = self.api(self.api(self.gateway.get_devices()))
+            #self.devices = self.api(self.api(self.gateway.get_devices()))
+            if self.groups:
+                self.groups = self.api(self.api(self.gateway.get_groups()))
         
             try:
                 for dev in self.devices:
@@ -252,26 +284,22 @@ class AdaptorFactory(ServerFactory):
             except Exception as e:
                 print("Unable to iterate devices")
 
-            try:
-                for group in self.groups:
-                    self.ikeaGroups[group.id] = ikeaGroup(factory=self, group=group)
-            except Exception as e:
-                print("Unable to iterate groups")
-            
-            self.observe = observe
+            if self.groups:
+                try:
+                    for group in self.groups:
+                        self.ikeaGroups[group.id] = ikeaGroup(factory=self, group=group)
+                except Exception as e:
+                    print("Unable to iterate groups")
 
-            if observe=="True":
+            if self.observe:
                 if not self.lc.running:
-                    self.lc.start(2)
+                    self.lc.start(int(command['pollinterval']))
             else:
                 if self.lc.running:
                     self.lc.stop()
+                self.announce()
 
-            client.transport.write(json.dumps({"action":"setConfig", "status": "Ok"}).encode(encoding='utf_8'))
-        
-            # Send inital state
-            self.announce()
-            
+            client.transport.write(json.dumps({"action":"setConfig", "status": "Ok"}).encode(encoding='utf_8'))        
         else:
             client.transport.write(json.dumps({"action":"setConfig", "status": "Failed", "error": "Connection timed out"}).encode(encoding='utf_8'))
 
@@ -283,15 +311,20 @@ class AdaptorFactory(ServerFactory):
         for key, aDevice in self.ikeaLights.items():
             # print (aDevice.modelNumber)
             if not aDevice.modelNumber in deviceConfig:
+<<<<<<< HEAD
                 print("Device settings not found for {0}. Creating defaults!".format(aDevice.modelNumber))
+=======
+                verbosePrint("Device settings not found for {0}. Creating defaults!".format(aDevice.modelNumber))
+>>>>>>> development
                 deviceConfig[aDevice.modelNumber] = deviceDefaults
                 configChanged = True
 
             devices.append({"DeviceID": aDevice.deviceID, "Name": aDevice.deviceName, "Type": "Light", "Dimmable": stringToBool(deviceConfig[aDevice.modelNumber]['dimmable']), "HasWB": stringToBool(deviceConfig[aDevice.modelNumber]['haswb']), "HasRGB": stringToBool(deviceConfig[aDevice.modelNumber]['hasrgb'])})
 
-        for key, aGroup in self.ikeaGroups.items():
-            #print (aGroup)
-            devices.append({"DeviceID": aGroup.deviceID, "Name": "Group - "+aGroup.deviceName, "Type": "Group", "Dimmable": True, "HasWB": False})
+        if self.groups:
+            for key, aGroup in self.ikeaGroups.items():
+                #print (aGroup)
+                devices.append({"DeviceID": aGroup.deviceID, "Name": "Group - "+aGroup.deviceName, "Type": "Group", "Dimmable": True, "HasWB": False})
 
         if configChanged:
             with open(INIFILE, "w") as configfile:
@@ -307,8 +340,9 @@ class AdaptorFactory(ServerFactory):
         for aDev in self.ikeaLights:
             self.ikeaLights[aDev].sendState(client)
 
-        for aGroup in self.ikeaGroups:
-            self.ikeaGroups[aGroup].sendState(client)
+        if self.groups:
+            for aGroup in self.ikeaGroups:
+                self.ikeaGroups[aGroup].sendState(client)
 
     def setLevel(self, client, deviceID, level):
         answer = {}
@@ -327,10 +361,11 @@ class AdaptorFactory(ServerFactory):
             setLevelCommand = targetDevice.light_control.set_dimmer(level)
             target = self.ikeaLights[deviceID]
 
-        if deviceID in self.ikeaGroups.keys():
-            targetDevice=self.api(self.gateway.get_group(deviceID))
-            setLevelCommand = targetDevice.set_dimmer(level)
-            target = self.ikeaGroups[deviceID]
+        if self.groups:
+            if deviceID in self.ikeaGroups.keys():
+                targetDevice=self.api(self.gateway.get_group(deviceID))
+                setLevelCommand = targetDevice.set_dimmer(level)
+                target = self.ikeaGroups[deviceID]
 
         if setLevelCommand != None:
             self.api(setLevelCommand)
@@ -339,9 +374,7 @@ class AdaptorFactory(ServerFactory):
 
         client.transport.write(json.dumps(answer).encode(encoding='utf_8'))
   
-        if self.observe=="False":
-            self.announce()
-
+        self.announce()
 
     def setState(self, client, deviceID, state):
         answer = {}
@@ -360,17 +393,15 @@ class AdaptorFactory(ServerFactory):
             state = False
 
         if deviceID in self.ikeaLights.keys():
-            # targetDeviceCommand = self.gateway.get_device(int(deviceID))
             targetDevice = self.api(self.gateway.get_device(int(deviceID)))
             setStateCommand = targetDevice.light_control.set_state(state)
             target = self.ikeaLights[deviceID]
 
-        if deviceID in self.ikeaGroups.keys():
-            # targetDeviceCommand = self.gateway.get_group(int(deviceID))
-            targetDevice = self.api(self.gateway.get_group(int(deviceID)))
-            print(targetDevice)
-            setStateCommand = targetDevice.set_state(state)
-            target = self.ikeaGroups[deviceID]
+        if self.groups:
+            if deviceID in self.ikeaGroups.keys():
+                targetDevice = self.api(self.gateway.get_group(int(deviceID)))
+                setStateCommand = targetDevice.set_state(state)
+                target = self.ikeaGroups[deviceID]
 
         try:
             self.api(setStateCommand)
@@ -380,12 +411,11 @@ class AdaptorFactory(ServerFactory):
         
         client.transport.write(json.dumps(answer).encode(encoding='utf_8'))
 
-        if self.observe=="False":
-            self.announce()
+        self.announce()
 
-    def setWB(self, client, deviceID, hex):
+    def setHex(self, client, deviceID, hex):
         answer = {}
-        answer["action"] = "setWB"
+        answer["action"] = "setHex"
         answer["status"] = "Ok"
 
         deviceID = int(deviceID)
@@ -397,14 +427,8 @@ class AdaptorFactory(ServerFactory):
         self.api(setStateCommand)
         client.transport.write(json.dumps(answer).encode(encoding='utf_8'))
 
+        self.announce()
 
-
-currentError = False
-
-def error(f):
-    global currentError
-    print (f.getErrorMessage())
-    currentError = True
     
 if __name__ == "__main__":
     print ("IKEA-tradfri COAP-adaptor version {0} started (command line)!".format(version))
@@ -420,9 +444,3 @@ else:
     service = TCPServer(1234, factory)
     application = Application("IKEA Tradfri Adaptor")
     service.setServiceParent(application)
-
-def start_reactor():
-    print ("IKEA-tradfri COAP-adaptor version {0} started (command line)!\nWaiting for connection".format(version))
-    verbose = True
-    endpoints.serverFromString(reactor, "tcp:1234").listen(AdaptorFactory())
-    reactor.run()
