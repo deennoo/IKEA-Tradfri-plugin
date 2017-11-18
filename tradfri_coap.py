@@ -25,6 +25,15 @@ def stringToBool(boolString):
     else:
         return None
 
+# Adapter configuration
+INIFILE = "{0}/tradfri.ini".format(os.path.dirname(os.path.realpath(__file__)))
+config = configparser.ConfigParser()
+if os.path.exists(INIFILE):
+    config.read(INIFILE)
+else:
+    print("Error: Missing configuration")
+    quit()
+
 # Device Configurations
 INIFILE = "{0}/devices.ini".format(os.path.dirname(os.path.realpath(__file__)))
 deviceDefaults = {"Dimmable": True, "HasWB": True, "HasRGB": False}
@@ -65,10 +74,11 @@ class IkeaFactory():
     def __init__(self):
         pass
 
-    async def initGateway(self, client, ip, key, observe):
+    async def initGateway(self, client, command):
         print("Setting gateway")
-        
-        self.api = await api_factory(ip, key)
+        api_factory = APIFactory(config["Gateway"]["ip"], config["Credentials"]["ident"],config["Credentials"]["psk"])
+ 
+        self.api = api_factory.request
         self.gateway = Gateway()
 
         client.send_data({"action":"setConfig", "status": "Ok"})
@@ -78,8 +88,8 @@ class IkeaFactory():
         answer = {}
         configChanged = False
 
-        self.devices = await self.api(*await self.api(self.gateway.get_devices()))
-        self.groups = await self.api(*await self.api(self.gateway.get_groups()))
+        self.devices = await self.api(await self.api(self.gateway.get_devices()))
+        self.groups = await self.api(await self.api(self.gateway.get_groups()))
 
         lights = [dev for dev in self.devices if dev.has_light_control]        
 
@@ -123,6 +133,27 @@ class IkeaFactory():
     #         for aLight in lights:
     #             print(aLight)
 
+    async def sendState(self, client, deviceID):
+        devices = []
+        answer = {}
+
+        deviceID = int(deviceID)
+
+        if deviceID in self.deviceIDs:
+            print ("Sending state for a device")
+            device = await self.api(self.gateway.get_device(deviceID))
+            devices.append({"DeviceID": deviceID, "Name": device.name, "State": device.light_control.lights[0].state, "Level": device.light_control.lights[0].dimmer, "Hex": device.light_control.lights[0].hex_color})
+
+        if deviceID in self.groupIDs:
+            print ("Sending state for a group")
+            device = await self.api(self.gateway.get_group(deviceID))
+            devices.append({"DeviceID": deviceID, "Name": device.name, "State": device.state, "Level": device.dimmer})
+
+        answer["action"] = "deviceUpdate"
+        answer["status"] = "Ok"
+        answer["result"] =  devices
+
+        client.send_data(answer)
 
     async def setState(self, client, command):
         print(command)
@@ -153,6 +184,7 @@ class IkeaFactory():
             await self.api(setStateCommand)
 
         client.send_data(answer)
+        loop.create_task(self.sendState(client, deviceID))
 
     async def setLevel(self, client, command):
         answer = {}
@@ -165,12 +197,10 @@ class IkeaFactory():
         setStateCommand = None
 
         if deviceID in self.deviceIDs:
-            print("Device")
             targetDevice = await self.api(self.gateway.get_device(deviceID))
             setStateCommand = targetDevice.light_control.set_dimmer(level)
             
         if deviceID in self.groupIDs:
-            print("Group")
             targetGroup = await self.api(self.gateway.get_group(deviceID))
             setStateCommand = targetGroup.set_dimmer(level)
 
@@ -178,10 +208,23 @@ class IkeaFactory():
             await self.api(setStateCommand)
 
         client.send_data(answer)
+        loop.create_task(self.sendState(client, deviceID))
 
-    async def setWB(self, client, command):
-        print("SetWB")
+    async def setHex(self, client, command):
+        
+        answer = {}
+        answer["action"] = "setHex"
+        answer["status"] = "Ok"
 
+        deviceID = int(command['deviceID'])
+        targetDevice = await self.api(self.gateway.get_device(deviceID))
+        setStateCommand = targetDevice.light_control.set_hex_color(command['hex'])
+
+        if setStateCommand is not None:
+            await self.api(setStateCommand)
+            client.send_data(answer)
+            loop.create_task(self.sendState(client, deviceID))
+            
     # Observations
 
     # async def monitor(self, lights):
@@ -239,7 +282,7 @@ class IkeaProtocol(asyncio.Protocol):
         for command in commands:
             if command['action']=="setConfig":
                 # print("Setting config")
-                loop.create_task(self.factory.initGateway(self, command['gateway'], command['key'], command['observe']))
+                loop.create_task(self.factory.initGateway(self, command))
 
             if command['action']=="getLights":
                 loop.create_task(self.factory.getLights(self))
@@ -253,8 +296,8 @@ class IkeaProtocol(asyncio.Protocol):
             if command['action']=="setLevel":
                 loop.create_task(self.factory.setLevel(self, command))
 
-            if command['action']=="setWB":
-                loop.create_task(self.factory.setWB(self, command))
+            if command['action']=="setHex":
+                loop.create_task(self.factory.setHex(self, command))
 
             # if command['action']=="getLights":
             #     self.factory.sendDeviceList(self)
@@ -275,7 +318,7 @@ class IkeaProtocol(asyncio.Protocol):
         cleanupTasks()
         print("Disconnected")
         
-        loop.create_task(heartbeat(verbose=True))
+        # loop.create_task(heartbeat(verbose=True))
 
     def send_data(self, dict):
         self.transport.write(json.dumps(dict).encode(encoding='utf_8'))
@@ -283,7 +326,7 @@ class IkeaProtocol(asyncio.Protocol):
 
 
 loop = asyncio.get_event_loop()
-loop.create_task(heartbeat(verbose=True))
+# loop.create_task(heartbeat(verbose=True))
 # Each client connection will create a new protocol instance
 coro = loop.create_server(IkeaProtocol, '', 1234)
 server = loop.run_until_complete(coro)

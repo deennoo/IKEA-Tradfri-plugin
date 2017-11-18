@@ -122,10 +122,6 @@ class BasePlugin:
                 Devices[aUnit].Delete()
 
     def updateDeviceState(self, deviceState):
-<<<<<<< HEAD
-        Domoticz.Log("updateDevicestate: {0}".format(deviceState))
-=======
->>>>>>> development
         for aDev in deviceState:
             devID = str(aDev["DeviceID"])
             targetUnit = self.lights[devID]['Unit']

@@ -311,11 +311,7 @@ class AdaptorFactory(ServerFactory):
         for key, aDevice in self.ikeaLights.items():
             # print (aDevice.modelNumber)
             if not aDevice.modelNumber in deviceConfig:
-<<<<<<< HEAD
-                print("Device settings not found for {0}. Creating defaults!".format(aDevice.modelNumber))
-=======
                 verbosePrint("Device settings not found for {0}. Creating defaults!".format(aDevice.modelNumber))
->>>>>>> development
                 deviceConfig[aDevice.modelNumber] = deviceDefaults
                 configChanged = True
 
