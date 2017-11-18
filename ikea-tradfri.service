@@ -1,18 +1,13 @@
 [Unit]
-Description=IKEA Tradfri COAP-adapter
+Description=Description=IKEA Tradfri COAP-adapter
+After=multi-user.target
 
 [Service]
-Type=simple
+Type=idle
 Environment=IKEA_HOME=/opt/domoticz/plugins/IKEA-Tradfri
-ExecStart=/usr/local/bin/twistd --nodaemon \
-      --rundir=${IKEA_HOME} \
-      --pidfile=${IKEA_HOME}/twistd.pid \
-      --python=${IKEA_HOME}/tradfri.tac
-
-User=domoticz
-Group=domoticz
-
-Restart=always
+ExecStart=/usr/bin/python3 ${IKEA_HOME}/tradfri_coap.py
+User=user
+Group=user
 
 [Install]
 WantedBy=multi-user.target
