@@ -14,19 +14,18 @@ The aiocoap version of the plugin only supports the latest beta of domoticz.
 
 
 ## Local Installation
-### 1. Install aiocoap version of pytradfri-library, including requirements:
-```shell
-  $ git clone https://github.com/ggravlingen/pytradfri.git
-  $ cd pytradfri
-  $ pip3 install -r requirements.txt
-  $ python3 setup.py install
-```
-
-### 2. Clone IKEA-tradfri plugin into domoticz plugins-directory
+### 1. Clone IKEA-tradfri plugin into domoticz plugins-directory
 ```
 ~/$ cd /opt/domoticz/plugins/
 /opt/domoticz/plugins$ git clone https://github.com/moroen/IKEA-Tradfri-plugin.git IKEA-Tradfri
 ```
+
+### 2. Install required dependencies
+```
+/opt/domoticz/plugins$ cd IKEA-Tradfri
+/opt/domoticz/plugins/IKEA-Tradfri$ pip3 install -r requirements.txt
+```
+Note: You should run pip3 as the user intended to run the adapter. Depending on your setup, pip3 might need to be run as root.
 
 ### 3. Create identity and pre-shared-key 
  - Yet to be implemented
@@ -39,7 +38,17 @@ The aiocoap version of the plugin only supports the latest beta of domoticz.
 ```
 
 #### Using systemd
- - Yet to be implemented
+Edit the ikea-tradfri.service-file, and specify the right path to the IKEA-tradfri directory and change user. Then copy the service-file to systemd-service directory, reload systemd-daemon and start the IKEA-tradfri service:
+```
+/opt/domoticz/plugins/IKEA-Tradfri$ sudo cp ikea-tradfri.service /lib/systemd/system/
+/opt/domoticz/plugins/IKEA-Tradfri$ sudo systemctl daemon-reload
+/opt/domoticz/plugins/IKEA-Tradfri$ sudo systemctl start ikea-tradfri.service
+```
+
+#### Using systemd to start the COAP-adaptor on startup
+```
+$ sudo systemctl enable ikea-tradfri.service
+```
 
 
 ### 5. Restart domoticz and enable IKEA-Tradfri from the hardware page
