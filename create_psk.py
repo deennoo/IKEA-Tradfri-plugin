@@ -30,18 +30,22 @@ def cleanupTasks():
        task.cancel()
 
 async def run():
-    api_factory = APIFactory(args.gateway, args.identity)    
-    psk = await api_factory.generate_psk(args.key)
+    try:
+        api_factory = APIFactory(args.gateway, args.identity)    
+        psk = await api_factory.generate_psk(args.key)
+    except:
+        pass
+        
+    if psk != None:
+        print('Generated PSK: ', psk)
 
-    print('Generated PSK: ', psk)
+        config["Gateway"] = {"ip": args.gateway}
+        config["Credentials"] = {"ident": args.identity, "psk": psk}
 
-    config["Gateway"] = {"ip": args.gateway}
-    config["Credentials"] = {"ident": args.identity, "psk": psk}
-
-    with open(INIFILE, "w") as configfile:
-        config.write(configfile)
-
-    # cleanupTasks()
+        with open(INIFILE, "w") as configfile:
+            config.write(configfile)
+    else:
+        print("Failed to generate PSK")
 
 # Entry
 asyncio.get_event_loop().run_until_complete(run())

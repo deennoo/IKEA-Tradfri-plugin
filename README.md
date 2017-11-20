@@ -28,7 +28,16 @@ The aiocoap version of the plugin only supports the latest beta of domoticz.
 Note: You should run pip3 as the user intended to run the adapter. Depending on your setup, pip3 might need to be run as root.
 
 ### 3. Create identity and pre-shared-key 
- - Yet to be implemented
+```
+/opt/domoticz/plugins/IKEA-Tradfri$ python3 create_psk.py IP KEY IDENT
+```
+where IP is the IKEA-gateway IP, KEY is the security key located beneath the gateway and IDENT is the desired identy for communicating with the gateway.
+
+This will generate the needed tradfri.ini file for the adapter, containing the needed credentials.
+
+NOTE: This script returns a lot of errors, but should work. Among the output you should see the line Generated PSK: ****. This means that the generation of PSK was sucessfull.
+
+NOTE2: If you try to generate a new PSK with the same IDENT, no new PSK will be generated. If the old PSK has been lost, simply generate another with a new IDENT.
 
 ### 4. Enable COAP-adaptor
 
@@ -38,7 +47,7 @@ Note: You should run pip3 as the user intended to run the adapter. Depending on 
 ```
 
 #### Using systemd
-Edit the ikea-tradfri.service-file, and specify the right path to the IKEA-tradfri directory and change user. Then copy the service-file to systemd-service directory, reload systemd-daemon and start the IKEA-tradfri service:
+Edit the ikea-tradfri.service-file, and specify the correct path to the IKEA-tradfri directory and change user. Then copy the service-file to systemd-service directory, reload systemd-daemon and start the IKEA-tradfri service:
 ```
 /opt/domoticz/plugins/IKEA-Tradfri$ sudo cp ikea-tradfri.service /lib/systemd/system/
 /opt/domoticz/plugins/IKEA-Tradfri$ sudo systemctl daemon-reload
