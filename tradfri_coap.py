@@ -5,6 +5,7 @@ import json, configparser, os
 
 from pytradfri import Gateway
 from pytradfri.api.aiocoap_api import APIFactory
+from pytradfri.error import PytradfriError, RequestTimeout
 
 version = 0.1
 
@@ -66,6 +67,7 @@ class IkeaFactory():
 
     devices = None
     groups = None
+    lights = None
 
     deviceIDs = []
     groupIDs = []
@@ -88,72 +90,76 @@ class IkeaFactory():
         answer = {}
         configChanged = False
 
-        self.devices = await self.api(await self.api(self.gateway.get_devices()))
-        self.groups = await self.api(await self.api(self.gateway.get_groups()))
+        try:
+            self.devices = await self.api(await self.api(self.gateway.get_devices()))
+            self.groups = await self.api(await self.api(self.gateway.get_groups()))
 
-        lights = [dev for dev in self.devices if dev.has_light_control]        
+            answer["action"] = "getLights"
+            answer["status"] = "Ok"
+        
+        except RequestTimeout as err:
+            print("GetLights - error: {0}".format(err))
+            answer["action"] = "getLights"
+            answer["status"] = "Error"
+            answer["result"] =  "Request timed out"
 
-        for aLight in lights:
-            
-            if not aLight.device_info.model_number in deviceConfig:
-                print("Device settings not found for {0}. Creating defaults!".format(aLight.device_info.model_number))
-                deviceConfig[aLight.device_info.model_number] = deviceDefaults
-                configChanged = True
-            
-            levelVal = None
-            if aLight.light_control.lights[0].dimmer is not None:
-                levelVal = aLight.light_control.lights[0].dimmer
-            else:
-                levelVal = 0
+        else:
+            self.lights = [dev for dev in self.devices if dev.has_light_control]        
+
+            for aLight in self.lights:
                 
-            resultDevices.append({"DeviceID": aLight.id, "Name": aLight.name, "State": aLight.light_control.lights[0].state, "Level": aLight.light_control.lights[0].dimmer, "Hex":aLight.light_control.lights[0].hex_color, "Type": "Light", "Dimmable": stringToBool(deviceConfig[aLight.device_info.model_number]['dimmable']), "HasWB": stringToBool(deviceConfig[aLight.device_info.model_number]['haswb']), "HasRGB": stringToBool(deviceConfig[aLight.device_info.model_number]['hasrgb'])})
-            self.deviceIDs.append(aLight.id)
+                if not aLight.device_info.model_number in deviceConfig:
+                    print("Device settings not found for {0}. Creating defaults!".format(aLight.device_info.model_number))
+                    deviceConfig[aLight.device_info.model_number] = deviceDefaults
+                    configChanged = True
+                
+                levelVal = None
+                if aLight.light_control.lights[0].dimmer is not None:
+                    levelVal = aLight.light_control.lights[0].dimmer
+                else:
+                    levelVal = 0
+                    
+                resultDevices.append({"DeviceID": aLight.id, "Name": aLight.name, "State": aLight.light_control.lights[0].state, "Level": aLight.light_control.lights[0].dimmer, "Hex":aLight.light_control.lights[0].hex_color, "Type": "Light", "Dimmable": stringToBool(deviceConfig[aLight.device_info.model_number]['dimmable']), "HasWB": stringToBool(deviceConfig[aLight.device_info.model_number]['haswb']), "HasRGB": stringToBool(deviceConfig[aLight.device_info.model_number]['hasrgb'])})
+                self.deviceIDs.append(aLight.id)
 
-        for aGroup in self.groups:
-            #print (aGroup)
-            resultDevices.append({"DeviceID": aGroup.id, "Name": "Group - "+aGroup.name, "Type": "Group", "Dimmable": True, "HasWB": False})
-            self.groupIDs.append(aGroup.id)
+            for aGroup in self.groups:
+                #print (aGroup)
+                resultDevices.append({"DeviceID": aGroup.id, "Name": "Group - "+aGroup.name, "Type": "Group", "Dimmable": True, "HasWB": False})
+                self.groupIDs.append(aGroup.id)
 
-        if configChanged:
-            with open(INIFILE, "w") as configfile:
-                deviceConfig.write(configfile)
-
-        answer["action"] = "getLights"
-        answer["status"] = "Ok"
-        answer["result"] =  resultDevices
+            if configChanged:
+                with open(INIFILE, "w") as configfile:
+                    deviceConfig.write(configfile)
+            
+            answer["result"] =  resultDevices
 
         client.send_data(answer)
-        # loop.create_task(self.monitor(lights))
-
-
-    # async def getStates(self, client):
-
-    #     if self.devices is not None:
-    #         lights = [dev for dev in self.devices if dev.has_light_control]
-    #         for aLight in lights:
-    #             print(aLight)
 
     async def sendState(self, client, deviceID):
         devices = []
         answer = {}
 
+        answer["action"] = "deviceUpdate"
         deviceID = int(deviceID)
 
-        if deviceID in self.deviceIDs:
-            print ("Sending state for a device")
-            device = await self.api(self.gateway.get_device(deviceID))
-            devices.append({"DeviceID": deviceID, "Name": device.name, "State": device.light_control.lights[0].state, "Level": device.light_control.lights[0].dimmer, "Hex": device.light_control.lights[0].hex_color})
+        try:
+            if deviceID in self.deviceIDs:
+                print ("Sending state for a device")
+                device = await self.api(self.gateway.get_device(deviceID))
+                devices.append({"DeviceID": deviceID, "Name": device.name, "State": device.light_control.lights[0].state, "Level": device.light_control.lights[0].dimmer, "Hex": device.light_control.lights[0].hex_color})
 
-        if deviceID in self.groupIDs:
-            print ("Sending state for a group")
-            device = await self.api(self.gateway.get_group(deviceID))
-            devices.append({"DeviceID": deviceID, "Name": device.name, "State": device.state, "Level": device.dimmer})
+            if deviceID in self.groupIDs:
+                print ("Sending state for a group")
+                device = await self.api(self.gateway.get_group(deviceID))
+                devices.append({"DeviceID": deviceID, "Name": device.name, "State": device.state, "Level": device.dimmer})
 
-        answer["action"] = "deviceUpdate"
-        answer["status"] = "Ok"
-        answer["result"] =  devices
-
-        client.send_data(answer)
+            answer["status"] = "Ok"
+            answer["result"] =  devices
+        except RequestTimeout:
+            answer["status"] = "Error"
+            answer["result"] =  "Request timed out"
+        finally:
+            client.send_data(answer)
 
     async def setState(self, client, command):
         print(command)
@@ -171,20 +177,24 @@ class IkeaFactory():
 
         if state == "Off":
             state = False
+        try:
+            if deviceID in self.deviceIDs:
+                targetDevice = await self.api(self.gateway.get_device(deviceID))
+                setStateCommand = targetDevice.light_control.set_state(state)
+                
+            if deviceID in self.groupIDs:
+                targetGroup = await self.api(self.gateway.get_group(deviceID))
+                setStateCommand = targetGroup.set_state(state)
 
-        if deviceID in self.deviceIDs:
-            targetDevice = await self.api(self.gateway.get_device(deviceID))
-            setStateCommand = targetDevice.light_control.set_state(state)
-            
-        if deviceID in self.groupIDs:
-            targetGroup = await self.api(self.gateway.get_group(deviceID))
-            setStateCommand = targetGroup.set_state(state)
+            if setStateCommand is not None:
+                await self.api(setStateCommand)
 
-        if setStateCommand is not None:
-            await self.api(setStateCommand)
-
-        client.send_data(answer)
-        loop.create_task(self.sendState(client, deviceID))
+        except RequestTimeout:
+            answer["status"] = "Error"
+            answer["result"] =  "Request timed out"
+        finally:
+            client.send_data(answer)
+            loop.create_task(self.sendState(client, deviceID))
 
     async def setLevel(self, client, command):
         answer = {}
@@ -196,19 +206,24 @@ class IkeaFactory():
         level = int(command['level'])
         setStateCommand = None
 
-        if deviceID in self.deviceIDs:
-            targetDevice = await self.api(self.gateway.get_device(deviceID))
-            setStateCommand = targetDevice.light_control.set_dimmer(level)
-            
-        if deviceID in self.groupIDs:
-            targetGroup = await self.api(self.gateway.get_group(deviceID))
-            setStateCommand = targetGroup.set_dimmer(level)
+        try:
+            if deviceID in self.deviceIDs:
+                targetDevice = await self.api(self.gateway.get_device(deviceID))
+                setStateCommand = targetDevice.light_control.set_dimmer(level)
+                
+            if deviceID in self.groupIDs:
+                targetGroup = await self.api(self.gateway.get_group(deviceID))
+                setStateCommand = targetGroup.set_dimmer(level)
 
-        if setStateCommand is not None:
-            await self.api(setStateCommand)
+            if setStateCommand is not None:
+                await self.api(setStateCommand)
 
-        client.send_data(answer)
-        loop.create_task(self.sendState(client, deviceID))
+        except RequestTimeout:
+            answer["status"] = "Error"
+            answer["result"] =  "Request timed out"
+        finally:
+            client.send_data(answer)
+            loop.create_task(self.sendState(client, deviceID))
 
     async def setHex(self, client, command):
         
@@ -220,44 +235,49 @@ class IkeaFactory():
         targetDevice = await self.api(self.gateway.get_device(deviceID))
         setStateCommand = targetDevice.light_control.set_hex_color(command['hex'])
 
-        if setStateCommand is not None:
-            await self.api(setStateCommand)
+        try:
+            if setStateCommand is not None:
+                await self.api(setStateCommand)
+                loop.create_task(self.sendState(client, deviceID))
+        except RequestTimeout:
+            answer["status"] = "Error"
+            answer["result"] =  "Request timed out"
+        finally:
             client.send_data(answer)
-            loop.create_task(self.sendState(client, deviceID))
-            
+
     # Observations
 
-    # async def monitor(self, lights):
-    #     observe_command = lights[1].observe(self.observe_callback, self.observe_err_callback, duration=60)
-        
-    #     observationTask = None
+    tasks = []
+    taskGroup = None
 
-    #     i = 0
-    #     while True:
-    #         i=i+1
-    #         if i == 20:
-    #             print("Stopping task")
-    #             if not observationTask.cancelled():
-    #                 observationTask.cancel()
-    #                 i=1
-    #         if i == 1:
-    #             print("Starting task")
-    #             observationTask = asyncio.ensure_future(self.api(observe_command))
+    async def HeartBeat(self):
+        i=0
+        while 1:
+            print(i)
+            if i==10:
+                ensure_future(self.startObservations(True))
+                i=0
+            i=i+1
+            await asyncio.sleep(1)
 
-    #         print("iteration: {0} Taks: {1}".format(i, len(loop.Tasks))
-    #         await asyncio.sleep(1)
-
-    #         # print("Starting observe")
+    async def startObservations(self, update=False):
+        #if not update:
+        #    loop.create_task(self.HeartBeat())
             
-    #         # await self.api(observe_command)
+        for light in self.lights:
+            observe_command = light.observe(self.observe_callback, self.observe_err_callback,
+                                            duration=0)
+            ensure_future(self.api(observe_command))
+            await asyncio.sleep(0)
 
+            
 
-    # def observe_callback(self, updated_device):
-    #     light = updated_device.light_control.lights[0]
-    #     print("Received message for: %s" % light)
+    def observe_callback(self, updated_device):
+        light = updated_device.light_control.lights[0]
+        print("Received message for: %s" % light)
 
-    # def observe_err_callback(self, err):
-    #     print('observe error:', err)  
+    def observe_err_callback(self, err):
+        print('observe error:', err)  
 
 # an instance of EchoProtocol will be created for each client connection.
 class IkeaProtocol(asyncio.Protocol):

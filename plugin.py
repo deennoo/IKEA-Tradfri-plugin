@@ -215,10 +215,9 @@ class BasePlugin:
             if action == "deviceUpdate":
                 self.updateDeviceState(command['result'])
 
-        if command['status'] == "Failed":
-            Domoticz.Log("Command {0} failed with error: {1}.".format(command['action'],command['error']))
-            Domoticz.Log(str(command))
-
+        if command['status'] == "Error":
+            Domoticz.Log("Command {0} failed with error: {1}.".format(command['action'],command['result']))
+            
     def onCommand(self, Unit, Command, Level, Hue):
         Domoticz.Debug("Command: " + str(Command)+" Level: "+str(Level)+" Type: "+str(Devices[Unit].Type)+" SubType: "+str(Devices[Unit].SubType)+" Hue: "+str(Hue))
 
