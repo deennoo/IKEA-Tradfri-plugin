@@ -51,16 +51,6 @@ def cleanupTasks():
     for task in asyncio.Task.all_tasks():
        task.cancel()
   
-async def heartbeat(verbose=False):
-    while 1:
-        print("\nTasks: {0}".format(len(asyncio.Task.all_tasks())))
-        
-        if verbose:
-            for task in asyncio.Task.all_tasks():
-                print(task)
-        
-        await asyncio.sleep(2)
-
 class IkeaFactory():
     gateway = None
     api = None
@@ -76,12 +66,27 @@ class IkeaFactory():
     def __init__(self):
         pass
 
+    async def heartBeat(self, client, pollinterval):
+        i=0
+
+        while 1:
+            i=i+1
+            if i==pollinterval:
+                # print("Sending states")
+                loop.create_task(self.sendAllStates(client))
+                i=0
+            await asyncio.sleep(1)
+
+
     async def initGateway(self, client, command):
         print("Setting gateway")
         api_factory = APIFactory(config["Gateway"]["ip"], config["Credentials"]["ident"],config["Credentials"]["psk"])
  
         self.api = api_factory.request
         self.gateway = Gateway()
+
+        if command["observe"]=="True":
+            loop.create_task(self.heartBeat(client, int(command["pollinterval"])))
 
         client.send_data({"action":"setConfig", "status": "Ok"})
 
@@ -133,6 +138,8 @@ class IkeaFactory():
             
             answer["result"] =  resultDevices
 
+        # loop.create_task(self.startObservations())
+
         client.send_data(answer)
 
     async def sendState(self, client, deviceID):
@@ -144,12 +151,12 @@ class IkeaFactory():
 
         try:
             if deviceID in self.deviceIDs:
-                print ("Sending state for a device")
+                # print ("Sending state for a device")
                 device = await self.api(self.gateway.get_device(deviceID))
                 devices.append({"DeviceID": deviceID, "Name": device.name, "State": device.light_control.lights[0].state, "Level": device.light_control.lights[0].dimmer, "Hex": device.light_control.lights[0].hex_color})
 
             if deviceID in self.groupIDs:
-                print ("Sending state for a group")
+                # print ("Sending state for a group")
                 device = await self.api(self.gateway.get_group(deviceID))
                 devices.append({"DeviceID": deviceID, "Name": device.name, "State": device.state, "Level": device.dimmer})
 
@@ -160,6 +167,13 @@ class IkeaFactory():
             answer["result"] =  "Request timed out"
         finally:
             client.send_data(answer)
+
+    async def sendAllStates(self, client):
+        for aLight in self.lights:
+            loop.create_task(self.sendState(client, aLight.id))
+
+        for aGroup in self.groups:
+            loop.create_task(self.sendState(client, aGroup.id))
 
     async def setState(self, client, command):
         print(command)
@@ -261,14 +275,13 @@ class IkeaFactory():
             await asyncio.sleep(1)
 
     async def startObservations(self, update=False):
-        #if not update:
-        #    loop.create_task(self.HeartBeat())
+        print("Starting observations")
             
         for light in self.lights:
             observe_command = light.observe(self.observe_callback, self.observe_err_callback,
                                             duration=0)
             ensure_future(self.api(observe_command))
-            await asyncio.sleep(0)
+            # await asyncio.sleep(0)
 
             
 
